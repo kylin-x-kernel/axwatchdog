@@ -7,11 +7,11 @@ license = "Apache-2.0"
 
 
 [dependencies]
-axplat-aarch64-peripherals = { version = "0.2.0", default-features = false, features = ["gicv2"] }
+axconfig.workspace = true
+axipi.workspace = true
+axlog.workspace = true
+spin.workspace = true
+
 lazy_static = { version = "1.5", features = ["spin_no_std"] }
-axconfig = { path = "../../arceos/modules/axconfig" }
-axipi = { path = "../../arceos/modules/axipi" }
-log = "0.4"
 axplat = "0.2"
-spin = "0.10"
 axcpu = "0.2"
