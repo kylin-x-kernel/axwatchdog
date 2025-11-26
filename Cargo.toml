@@ -5,7 +5,13 @@ edition = "2024"
 authors = ["ZhiXian Luo <luozhixian@kylinos.cn>"]
 license = "Apache-2.0"
 
+[features]
+default = []
+sdei = []
+nmi = []
+pmu = ["dep:aarch64-pmuv3"]
 
 [dependencies]
 axplat = {version = "0.2", features = ["irq"] }
+aarch64-pmuv3 = { path = "../aarch64-pmu", optional = true}
 log = "0.4"

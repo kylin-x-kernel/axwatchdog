@@ -1,12 +1,11 @@
-use axplat::irq;
 use log::warn;
 
-// pub fn init(irq_num:usize) {
-//     warn!("nmi init");
-//     gic::set_priority(irq_num as u32,0);
-//     pmu::init(0xf0000000);
-// }
+/// Non Maskable Interrupt
+pub trait NonMaskableInterruptTrait {
+    fn nmi_init(&self);
+    fn nmi_handle(&self);
+}
 
-pub fn handle(){
+pub fn handle() {
     warn!("nmi handle");
 }
