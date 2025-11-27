@@ -5,8 +5,175 @@
 
 use core::sync::atomic::{AtomicU64, Ordering};
 
+use crate::percpu::CpuHealth;
+
 /// Maximum number of snapshots to keep per CPU.
 pub const MAX_SNAPSHOTS_PER_CPU: usize = 4;
+
+/// Maximum number of lockup events to keep.
+pub const MAX_LOCKUP_EVENTS: usize = 16;
+
+/// Type of lockup event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum LockupType {
+    /// Softlockup: tasks not scheduled.
+    Soft = 0,
+    /// Hardlockup: CPU completely stuck.
+    Hard = 1,
+    /// Possible deadlock.
+    Deadlock = 2,
+    /// Task timeout.
+    TaskTimeout = 3,
+}
+
+impl LockupType {
+    /// Convert from CpuHealth.
+    pub fn from_health(health: CpuHealth) -> Option<Self> {
+        match health {
+            CpuHealth::SoftLockup => Some(LockupType::Soft),
+            CpuHealth::HardLockup => Some(LockupType::Hard),
+            CpuHealth::PossibleDeadlock => Some(LockupType::Deadlock),
+            CpuHealth::Healthy => None,
+        }
+    }
+}
+
+/// A lockup event record.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct LockupEvent {
+    /// Sequence number.
+    pub sequence: u64,
+    /// Timestamp when detected (nanoseconds).
+    pub timestamp_ns: u64,
+    /// CPU ID where lockup occurred.
+    pub cpu_id: usize,
+    /// Type of lockup.
+    pub lockup_type: LockupType,
+    /// Program counter at detection.
+    pub pc: usize,
+    /// Stack pointer at detection.
+    pub sp: usize,
+    /// Link register at detection.
+    pub lr: usize,
+    /// How long the condition lasted (nanoseconds).
+    pub duration_ns: u64,
+    /// Number of locks held (for deadlock).
+    pub locks_held: u32,
+    /// Padding.
+    _padding: [u8; 4],
+}
+
+impl LockupEvent {
+    /// Create an empty event.
+    pub const fn empty() -> Self {
+        Self {
+            sequence: 0,
+            timestamp_ns: 0,
+            cpu_id: 0,
+            lockup_type: LockupType::Soft,
+            pc: 0,
+            sp: 0,
+            lr: 0,
+            duration_ns: 0,
+            locks_held: 0,
+            _padding: [0; 4],
+        }
+    }
+
+    /// Check if this event is valid.
+    pub fn is_valid(&self) -> bool {
+        self.sequence > 0
+    }
+}
+
+impl Default for LockupEvent {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+/// Lockup event ring buffer (lock-free).
+pub struct LockupEventBuffer {
+    events: [LockupEvent; MAX_LOCKUP_EVENTS],
+    write_index: AtomicU64,
+    sequence: AtomicU64,
+}
+
+impl LockupEventBuffer {
+    /// Create a new empty buffer.
+    pub const fn new() -> Self {
+        const EMPTY: LockupEvent = LockupEvent::empty();
+        Self {
+            events: [EMPTY; MAX_LOCKUP_EVENTS],
+            write_index: AtomicU64::new(0),
+            sequence: AtomicU64::new(0),
+        }
+    }
+
+    /// Record a lockup event.
+    pub fn record(
+        &mut self,
+        cpu_id: usize,
+        lockup_type: LockupType,
+        pc: usize,
+        sp: usize,
+        lr: usize,
+        timestamp_ns: u64,
+        duration_ns: u64,
+        locks_held: u32,
+    ) -> &LockupEvent {
+        let seq = self.sequence.fetch_add(1, Ordering::AcqRel) + 1;
+        let idx = self.write_index.fetch_add(1, Ordering::AcqRel) as usize % MAX_LOCKUP_EVENTS;
+
+        self.events[idx] = LockupEvent {
+            sequence: seq,
+            timestamp_ns,
+            cpu_id,
+            lockup_type,
+            pc,
+            sp,
+            lr,
+            duration_ns,
+            locks_held,
+            _padding: [0; 4],
+        };
+
+        &self.events[idx]
+    }
+
+    /// Get the latest event.
+    pub fn latest(&self) -> Option<&LockupEvent> {
+        let idx = self.write_index.load(Ordering::Acquire);
+        if idx == 0 {
+            return None;
+        }
+        let actual_idx = ((idx - 1) as usize) % MAX_LOCKUP_EVENTS;
+        let event = &self.events[actual_idx];
+        if event.is_valid() {
+            Some(event)
+        } else {
+            None
+        }
+    }
+
+    /// Get total count of recorded events.
+    pub fn total_count(&self) -> u64 {
+        self.sequence.load(Ordering::Acquire)
+    }
+
+    /// Iterate over valid events.
+    pub fn iter_valid(&self) -> impl Iterator<Item = &LockupEvent> {
+        self.events.iter().filter(|e| e.is_valid())
+    }
+}
+
+impl Default for LockupEventBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// CPU register snapshot.
 ///
