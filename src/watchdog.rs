@@ -1,13 +1,9 @@
 extern crate alloc;
 use alloc::{boxed::Box, vec::Vec};
-use axlog::warn;
-use lazy_static::lazy_static;
-use spin::Mutex;
 use axplat::cpu::this_cpu_id;
 use core::sync::atomic::{AtomicBool, Ordering};
-lazy_static! {
-    pub static ref WATCHDOG: Mutex<Watchdog> = Mutex::new(Watchdog::new());
-}
+
+pub static mut WATCHDOG: Watchdog = Watchdog { tasks: Vec::new() };
 /// Watchdog task trait. Modules that should be monitored implement this trait.
 pub trait WatchdogTask {
     /// Unique identifier for the task (e.g. name or ID).
@@ -24,10 +20,6 @@ pub struct Watchdog {
 }
 
 impl Watchdog {
-    fn new() -> Self {
-        Watchdog { tasks: Vec::new() }
-    }
-
     /// Register a task. Returns error on duplicate ID.
     pub fn register_task(
         &mut self,
@@ -75,9 +67,11 @@ fn freeze_cpu_and_dump() {
     }
 }
 
-fn generate_system_snapshot(cpu_id: usize){
-    warn!("cpu id: {},system log",cpu_id);
+fn generate_system_snapshot(_cpu_id: usize){
+    axtask::show_global_task_queue();
+    panic!("watchdog panic");
 }
+
 // Per-CPU frozen state flags
 static CPU_FROZEN_FLAGS: [AtomicBool; axconfig::plat::CPU_NUM] = {
     let flags = [const { AtomicBool::new(false) }; axconfig::plat::CPU_NUM];

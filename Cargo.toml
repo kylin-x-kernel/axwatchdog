@@ -1,7 +1,7 @@
 [package]
 name = "axwatchdog"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["ZhiXian Luo <luozhixian@kylinos.cn>"]
 license = "Apache-2.0"
 
@@ -10,6 +10,7 @@ license = "Apache-2.0"
 axconfig.workspace = true
 axipi.workspace = true
 axlog.workspace = true
+axtask.workspace = true
 spin.workspace = true
 
 lazy_static = { version = "1.5", features = ["spin_no_std"] }
