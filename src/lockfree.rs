@@ -3,9 +3,11 @@
 //! These data structures are designed to be used in NMI/interrupt context
 //! where no locks can be held. They use only atomic operations.
 
-use core::cell::UnsafeCell;
-use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::{
+    cell::UnsafeCell,
+    mem::MaybeUninit,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 // =============================================================================
 // Lock-free SPSC Ring Buffer
@@ -160,7 +162,6 @@ pub struct AtomicBitmap<const N: usize> {
 impl<const N: usize> AtomicBitmap<N> {
     /// Bits per word.
     const BITS_PER_WORD: usize = core::mem::size_of::<usize>() * 8;
-
     /// Total capacity in bits.
     pub const CAPACITY: usize = N * Self::BITS_PER_WORD;
 

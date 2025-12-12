@@ -272,8 +272,9 @@ unsafe impl Sync for NmiHandlerStorage {}
 pub mod sdei_nmi {
     //! SDEI-based NMI implementation.
 
+    use aarch64_sdei::{SDEI_EVENT_SOFTWARE_NMI, Sdei};
+
     use super::*;
-    use aarch64_sdei::{Sdei, SDEI_EVENT_SOFTWARE_NMI};
 
     /// SDEI-based NMI source.
     pub struct SdeiNmi {
@@ -363,8 +364,9 @@ pub mod sdei_nmi {
 pub mod pmu_nmi {
     //! PMU overflow-based NMI implementation.
 
-    use super::*;
     use aarch64_pmuv3::PmuNmi as PmuNmiHw;
+
+    use super::*;
 
     /// PMU overflow-based NMI source.
     pub struct PmuNmiSource {
@@ -455,8 +457,7 @@ pub mod pmu_nmi {
 // Re-exports
 // =============================================================================
 
-#[cfg(feature = "sdei")]
-pub use sdei_nmi::SdeiNmi;
-
 #[cfg(feature = "pmu")]
 pub use pmu_nmi::PmuNmiSource;
+#[cfg(feature = "sdei")]
+pub use sdei_nmi::SdeiNmi;

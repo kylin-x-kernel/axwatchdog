@@ -25,6 +25,8 @@
 
 use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicU64, Ordering};
 
+use log::warn;
+
 use crate::snapshot::CpuSnapshot;
 
 /// Maximum number of CPUs supported.
@@ -44,11 +46,11 @@ pub const DEFAULT_LOCK_TIMEOUT_NS: u64 = 60_000_000_000;
 #[repr(u32)]
 pub enum CpuHealth {
     /// CPU is operating normally.
-    Healthy = 0,
+    Healthy          = 0,
     /// Softlockup: tasks not being scheduled, but interrupts work.
-    SoftLockup = 1,
+    SoftLockup       = 1,
     /// Hardlockup: CPU completely stuck, even interrupts don't run.
-    HardLockup = 2,
+    HardLockup       = 2,
     /// Possible deadlock: lock held for too long.
     PossibleDeadlock = 3,
 }
@@ -76,13 +78,13 @@ impl CpuHealth {
 #[repr(u32)]
 pub enum WatchdogState {
     /// Watchdog is idle, not monitoring.
-    Idle = 0,
+    Idle      = 0,
     /// Watchdog is active and monitoring.
-    Active = 1,
+    Active    = 1,
     /// Health check detected a problem.
     Triggered = 2,
     /// Currently dumping CPU state.
-    Dumping = 3,
+    Dumping   = 3,
     /// Watchdog completed (terminal state until reset).
     Completed = 4,
 }
@@ -113,12 +115,6 @@ impl WatchdogState {
 /// - `locks_held` / `earliest_lock_time`: Track lock holding for deadlock detection
 #[repr(C, align(64))]
 pub struct PerCpuState {
-    // === Heartbeat (legacy, for task monitoring) ===
-    /// Heartbeat counter - tasks increment this to show they're alive.
-    heartbeat: AtomicU64,
-    /// Last heartbeat value seen during NMI check.
-    last_checked_heartbeat: AtomicU64,
-
     // === Softlockup Detection ===
     /// Timestamp when watchdog thread last ran (nanoseconds).
     /// Updated by watchdog thread, checked by timer interrupt.
@@ -155,8 +151,6 @@ impl PerCpuState {
     /// Create a new per-CPU state.
     pub const fn new() -> Self {
         Self {
-            heartbeat: AtomicU64::new(0),
-            last_checked_heartbeat: AtomicU64::new(0),
             soft_timestamp: AtomicU64::new(0),
             hrtimer_interrupts: AtomicU32::new(0),
             hrtimer_interrupts_saved: AtomicU32::new(0),
@@ -169,42 +163,6 @@ impl PerCpuState {
             snapshot: AtomicPtr::new(core::ptr::null_mut()),
             last_update_ns: AtomicU64::new(0),
         }
-    }
-
-    // =========================================================================
-    // Heartbeat operations (legacy task monitoring)
-    // =========================================================================
-
-    /// Increment the heartbeat counter (called by monitored tasks).
-    ///
-    /// This is the "pet the watchdog" operation.
-    #[inline]
-    pub fn pet(&self) {
-        self.heartbeat.fetch_add(1, Ordering::Release);
-    }
-
-    /// Increment heartbeat with timestamp.
-    #[inline]
-    pub fn pet_with_timestamp(&self, timestamp_ns: u64) {
-        self.heartbeat.fetch_add(1, Ordering::Release);
-        self.last_update_ns.store(timestamp_ns, Ordering::Release);
-    }
-
-    /// Get the current heartbeat value.
-    #[inline]
-    pub fn heartbeat(&self) -> u64 {
-        self.heartbeat.load(Ordering::Acquire)
-    }
-
-    /// Check if heartbeat has increased since last check.
-    ///
-    /// Returns `true` if healthy (heartbeat increased), `false` if stuck.
-    /// This also updates the last_checked_heartbeat.
-    #[inline]
-    pub fn check_heartbeat(&self) -> bool {
-        let current = self.heartbeat.load(Ordering::Acquire);
-        let last = self.last_checked_heartbeat.swap(current, Ordering::AcqRel);
-        current != last
     }
 
     // =========================================================================
@@ -236,6 +194,7 @@ impl PerCpuState {
             // Not yet initialized
             return false;
         }
+        // warn!("last: {}, now_ns: {}",last,now_ns);
         now_ns.saturating_sub(last) > threshold_ns
     }
 
@@ -264,7 +223,8 @@ impl PerCpuState {
         let saved = self.hrtimer_interrupts_saved.load(Ordering::Acquire);
 
         // Update saved value for next check
-        self.hrtimer_interrupts_saved.store(current, Ordering::Release);
+        self.hrtimer_interrupts_saved
+            .store(current, Ordering::Release);
 
         // If counts are equal, no timer interrupts occurred
         current == saved && current != 0
@@ -279,7 +239,8 @@ impl PerCpuState {
     /// Set hardlockup warned flag.
     #[inline]
     pub fn set_hardlockup_warned(&self, warned: bool) {
-        self.hardlockup_warned.store(warned as u32, Ordering::Release);
+        self.hardlockup_warned
+            .store(warned as u32, Ordering::Release);
     }
 
     // =========================================================================
@@ -294,7 +255,8 @@ impl PerCpuState {
         let count = self.locks_held.fetch_add(1, Ordering::AcqRel);
         if count == 0 {
             // First lock, record time
-            self.earliest_lock_time.store(timestamp_ns, Ordering::Release);
+            self.earliest_lock_time
+                .store(timestamp_ns, Ordering::Release);
         }
     }
 
@@ -340,33 +302,32 @@ impl PerCpuState {
     ///
     /// Call this from NMI handler.
     /// Returns the current health status of this CPU.
-    pub fn check_health(
-        &self,
-        now_ns: u64,
-        soft_thresh_ns: u64,
-        lock_thresh_ns: u64,
-    ) -> CpuHealth {
+    pub fn check_health(&self, now_ns: u64, soft_thresh_ns: u64, lock_thresh_ns: u64) -> CpuHealth {
         // Priority: Hardlockup > Softlockup > Deadlock > Healthy
 
         // 1. Check hardlockup (most severe)
         if self.check_hardlockup() {
-            self.last_health.store(CpuHealth::HardLockup as u32, Ordering::Release);
+            self.last_health
+                .store(CpuHealth::HardLockup as u32, Ordering::Release);
             return CpuHealth::HardLockup;
         }
 
         // 2. Check softlockup
         if self.check_softlockup(now_ns, soft_thresh_ns) {
-            self.last_health.store(CpuHealth::SoftLockup as u32, Ordering::Release);
+            self.last_health
+                .store(CpuHealth::SoftLockup as u32, Ordering::Release);
             return CpuHealth::SoftLockup;
         }
 
         // 3. Check deadlock
         if self.check_deadlock(now_ns, lock_thresh_ns) {
-            self.last_health.store(CpuHealth::PossibleDeadlock as u32, Ordering::Release);
+            self.last_health
+                .store(CpuHealth::PossibleDeadlock as u32, Ordering::Release);
             return CpuHealth::PossibleDeadlock;
         }
 
-        self.last_health.store(CpuHealth::Healthy as u32, Ordering::Release);
+        self.last_health
+            .store(CpuHealth::Healthy as u32, Ordering::Release);
         CpuHealth::Healthy
     }
 
@@ -450,8 +411,6 @@ impl PerCpuState {
 
     /// Reset all state to initial values.
     pub fn reset(&self) {
-        self.heartbeat.store(0, Ordering::Release);
-        self.last_checked_heartbeat.store(0, Ordering::Release);
         self.soft_timestamp.store(0, Ordering::Release);
         self.hrtimer_interrupts.store(0, Ordering::Release);
         self.hrtimer_interrupts_saved.store(0, Ordering::Release);
@@ -511,22 +470,6 @@ impl PerCpuArray {
         self.states.get(cpu_id)
     }
 
-    /// Pet the watchdog for a specific CPU.
-    #[inline]
-    pub fn pet(&self, cpu_id: usize) {
-        if let Some(state) = self.try_get(cpu_id) {
-            state.pet();
-        }
-    }
-
-    /// Pet the watchdog with timestamp.
-    #[inline]
-    pub fn pet_with_timestamp(&self, cpu_id: usize, timestamp_ns: u64) {
-        if let Some(state) = self.try_get(cpu_id) {
-            state.pet_with_timestamp(timestamp_ns);
-        }
-    }
-
     /// Touch softlockup timestamp for a CPU (watchdog thread).
     #[inline]
     pub fn touch_softlockup(&self, cpu_id: usize, timestamp_ns: u64) {
@@ -543,25 +486,14 @@ impl PerCpuArray {
         }
     }
 
-    /// Check heartbeat for a specific CPU.
-    #[inline]
-    pub fn check_heartbeat(&self, cpu_id: usize) -> bool {
-        self.try_get(cpu_id)
-            .map(|s| s.check_heartbeat())
-            .unwrap_or(true) // Non-existent CPUs are "healthy"
-    }
-
-    /// Check all CPUs and return a bitmap of unhealthy ones.
-    ///
-    /// Bit N is set if CPU N failed the heartbeat check.
-    pub fn check_all(&self, num_cpus: usize) -> u64 {
-        let mut unhealthy: u64 = 0;
-        for i in 0..num_cpus.min(64) {
-            if !self.check_heartbeat(i) {
-                unhealthy |= 1 << i;
+    /// Check softlockup of a specific CPU.
+    pub fn check_softlockup(&self, cpu_id: usize, now_ns: u64, soft_thresh_ns: u64) -> CpuHealth {
+        if let Some(state) = self.try_get(cpu_id) {
+            if state.check_softlockup(now_ns, soft_thresh_ns) {
+                return CpuHealth::SoftLockup;
             }
         }
-        unhealthy
+        CpuHealth::Healthy
     }
 
     /// Check health of a specific CPU.
@@ -603,24 +535,10 @@ unsafe impl Sync for PerCpuArray {}
 /// Global per-CPU state array.
 pub static PERCPU_STATE: PerCpuArray = PerCpuArray::new();
 
-/// Convenience function to pet the watchdog for the current CPU.
-///
-/// # Arguments
-/// * `cpu_id` - Current CPU ID (caller must provide this)
-#[inline]
-pub fn pet(cpu_id: usize) {
-    PERCPU_STATE.pet(cpu_id);
-}
-
-/// Convenience function to pet with timestamp.
-#[inline]
-pub fn pet_with_timestamp(cpu_id: usize, timestamp_ns: u64) {
-    PERCPU_STATE.pet_with_timestamp(cpu_id, timestamp_ns);
-}
-
 /// Touch softlockup timestamp (called from watchdog thread).
 #[inline]
 pub fn touch_softlockup(cpu_id: usize, timestamp_ns: u64) {
+    // warn!("cpu_id: {}, timestamp: {}", cpu_id, timestamp_ns);
     PERCPU_STATE.touch_softlockup(cpu_id, timestamp_ns);
 }
 
@@ -646,10 +564,10 @@ pub fn lock_released(cpu_id: usize) {
     }
 }
 
-/// Check if a CPU's heartbeat is healthy.
+/// Check comprehensive health of a CPU.
 #[inline]
-pub fn check_cpu(cpu_id: usize) -> bool {
-    PERCPU_STATE.check_heartbeat(cpu_id)
+pub fn check_softlockup(cpu_id: usize, now_ns: u64) -> CpuHealth {
+    PERCPU_STATE.check_softlockup(cpu_id, now_ns, DEFAULT_SOFTLOCKUP_THRESH_NS)
 }
 
 /// Check comprehensive health of a CPU.

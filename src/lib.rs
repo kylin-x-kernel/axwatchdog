@@ -59,8 +59,13 @@
 //! struct MyTask;
 //!
 //! impl WatchdogTask for MyTask {
-//!     fn name(&self) -> &'static str { "my_task" }
-//!     fn health_check(&self) -> bool { true }
+//!     fn name(&self) -> &'static str {
+//!         "my_task"
+//!     }
+//!
+//!     fn health_check(&self) -> bool {
+//!         true
+//!     }
 //! }
 //!
 //! // Initialize watchdog
@@ -87,27 +92,24 @@ pub mod snapshot;
 pub mod task;
 
 // Re-exports
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+
 pub use lockfree::{AtomicBitmap, AtomicSequence, SpscRingBuffer};
+#[cfg(feature = "pmu")]
+pub use nmi::PmuNmiSource;
+#[cfg(feature = "sdei")]
+pub use nmi::SdeiNmi;
 pub use nmi::{NmiContext, NmiError, NmiHandler, NmiResult, NmiSource};
 pub use percpu::{
-    check_cpu, check_cpu_health, lock_acquired, lock_released, pet, pet_with_timestamp,
-    timer_tick, touch_softlockup, CpuHealth, PerCpuArray, PerCpuState, WatchdogState,
-    DEFAULT_HARDLOCKUP_THRESH_NS, DEFAULT_LOCK_TIMEOUT_NS, DEFAULT_SOFTLOCKUP_THRESH_NS,
-    PERCPU_STATE,
+    CpuHealth, DEFAULT_HARDLOCKUP_THRESH_NS, DEFAULT_LOCK_TIMEOUT_NS, DEFAULT_SOFTLOCKUP_THRESH_NS,
+    PERCPU_STATE, PerCpuArray, PerCpuState, WatchdogState, check_cpu_health, check_softlockup,
+    lock_acquired, lock_released, timer_tick, touch_softlockup,
 };
 pub use snapshot::{CpuSnapshot, LockupEvent, LockupEventBuffer, LockupType, SnapshotCollector};
 pub use task::{
-    check_all_tasks, register_task, unregister_task, HeartbeatTask, RegistryError, TaskHandle, 
-    TaskRegistry, WatchdogTask, TASK_REGISTRY,
+    HeartbeatTask, RegistryError, TASK_REGISTRY, TaskHandle, TaskRegistry, WatchdogTask,
+    check_all_tasks, register_task, unregister_task,
 };
-
-#[cfg(feature = "sdei")]
-pub use nmi::SdeiNmi;
-
-#[cfg(feature = "pmu")]
-pub use nmi::PmuNmiSource;
-
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 /// Watchdog configuration.
 #[derive(Debug, Clone, Copy)]
@@ -305,7 +307,7 @@ impl Watchdog {
             softlockup_thresh_ns: AtomicU64::new(DEFAULT_SOFTLOCKUP_THRESH_NS),
             lock_timeout_ns: AtomicU64::new(DEFAULT_LOCK_TIMEOUT_NS),
             fail_threshold: AtomicU32::new(3),
-            num_cpus: AtomicU32::new(1),
+            num_cpus: AtomicU32::new(4),
             auto_restart: AtomicBool::new(true),
             panic_on_hardlockup: AtomicBool::new(true),
             panic_on_softlockup: AtomicBool::new(false),

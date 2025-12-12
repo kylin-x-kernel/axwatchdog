@@ -9,7 +9,7 @@ keywords = ["watchdog", "nmi", "embedded", "no_std"]
 categories = ["no-std", "embedded", "hardware-support"]
 
 [features]
-default = []
+default = ["log"]
 sdei = ["dep:aarch64-sdei"]
 pmu = ["dep:aarch64-pmuv3"]
 log = ["dep:log"]

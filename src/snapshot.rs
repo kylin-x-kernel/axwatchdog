@@ -18,11 +18,11 @@ pub const MAX_LOCKUP_EVENTS: usize = 16;
 #[repr(u8)]
 pub enum LockupType {
     /// Softlockup: tasks not scheduled.
-    Soft = 0,
+    Soft        = 0,
     /// Hardlockup: CPU completely stuck.
-    Hard = 1,
+    Hard        = 1,
     /// Possible deadlock.
-    Deadlock = 2,
+    Deadlock    = 2,
     /// Task timeout.
     TaskTimeout = 3,
 }
@@ -151,11 +151,7 @@ impl LockupEventBuffer {
         }
         let actual_idx = ((idx - 1) as usize) % MAX_LOCKUP_EVENTS;
         let event = &self.events[actual_idx];
-        if event.is_valid() {
-            Some(event)
-        } else {
-            None
-        }
+        if event.is_valid() { Some(event) } else { None }
     }
 
     /// Get total count of recorded events.
